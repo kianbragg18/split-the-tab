@@ -206,15 +206,23 @@
     async function runOCR(file) {
       const status = $("ocrStatus");
       status.classList.remove("hidden", "done");
-      if (typeof Tesseract === "undefined") { status.textContent = "Type the items in below."; return; }
-      status.textContent = "📖 Reading the receipt… 0% (first scan loads the reader, ~10–20s)";
+      status.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (typeof Tesseract === "undefined") {
+        status.textContent = "⚠ The reader couldn't load (network/ad-blocker?). You can still type items below.";
+        return;
+      }
+      status.textContent = "📖 Loading the receipt reader… (first time only, a few seconds)";
       try {
-        const { data } = await Tesseract.recognize(file, "eng", {
+        const worker = await Tesseract.createWorker("eng", 1, {
           logger: m => {
             if (m.status === "recognizing text")
               status.textContent = "📖 Reading the receipt… " + Math.round(m.progress * 100) + "%";
+            else if (m.status)
+              status.textContent = "📖 " + m.status + "…";
           }
         });
+        const { data } = await worker.recognize(file);
+        await worker.terminate();
         const items = parseReceipt(data.text || "");
         if (items.length) {
           setItems(items);
@@ -222,10 +230,10 @@
           status.textContent = "✓ Found " + items.length + " item" + (items.length > 1 ? "s" : "") +
             " — double-check the names & prices below, then create the bill.";
         } else {
-          status.textContent = "Couldn't read items clearly — just type them in below.";
+          status.textContent = "Read the photo, but couldn't pick out priced items — type them in below.";
         }
       } catch (e) {
-        status.textContent = "Couldn't scan that photo — type the items in below.";
+        status.textContent = "⚠ Scan error: " + ((e && e.message) ? e.message : e) + " — you can still type items below.";
       }
     }
     function wireCreateScreen() {
