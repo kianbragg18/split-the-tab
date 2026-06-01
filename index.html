@@ -62,6 +62,8 @@
     .myshare .per { font-size: 2.2rem; font-weight: 600; letter-spacing: -0.02em; }
     .myshare .lbl { font-size: 0.85rem; opacity: .9; }
     .footnote { color: var(--muted); font-size: 0.78rem; text-align: center; margin-top: 18px; }
+    .ocr-status { font-size: 0.84rem; color: var(--muted); margin-top: 10px; }
+    .ocr-status.done { color: var(--accent); }
     .hidden { display: none !important; }
     .live-dot { display: inline-block; width: 8px; height: 8px; background: var(--accent); border-radius: 50%; margin-right: 5px; vertical-align: middle; animation: pulse 1.6s infinite; }
     @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
@@ -79,9 +81,10 @@
       <div class="card">
         <h2>1. Receipt photo <span style="color:var(--muted);font-weight:400;font-size:.85rem">(optional helper)</span></h2>
         <label class="photo" id="photoBox">
-          <input type="file" id="photoInput" accept="image/*" capture="environment" />
-          <span class="hint" id="photoHint">📷 Add a photo to read items off while you type</span>
+          <input type="file" id="photoInput" accept="image/*" />
+          <span class="hint" id="photoHint">📷 Add a photo — we'll try to read the items for you</span>
         </label>
+        <div class="ocr-status hidden" id="ocrStatus"></div>
       </div>
       <div class="card">
         <h2>2. Add the items</h2>
@@ -138,6 +141,7 @@
     <p class="footnote">Photos stay on your device. Picks sync live for everyone with the link.</p>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
   <script>
   (function () {
     // Free, keyless cloud store — no account, no keys, works immediately.
@@ -162,11 +166,67 @@
       const row = document.createElement("div");
       row.className = "item-row";
       row.innerHTML =
-        '<input class="name" type="text" placeholder="Item" value="' + name + '" />' +
-        '<input class="price" type="number" inputmode="decimal" placeholder="0.00" step="0.01" min="0" value="' + price + '" />' +
+        '<input class="name" type="text" placeholder="Item" />' +
+        '<input class="price" type="number" inputmode="decimal" placeholder="0.00" step="0.01" min="0" />' +
         '<button class="del" title="Remove">×</button>';
+      row.querySelector(".name").value = name;
+      row.querySelector(".price").value = price;
       row.querySelector(".del").onclick = () => row.remove();
       $("itemRows").appendChild(row);
+    }
+
+    // replace the list with scanned items (+ one blank row for extras)
+    function setItems(list) {
+      $("itemRows").innerHTML = "";
+      list.forEach(it => addItemRow(it.name, it.price));
+      addItemRow();
+    }
+
+    // turn raw receipt text into {name, price} rows
+    function parseReceipt(text) {
+      const skip = /(sub-?total|total|tax|tip|gratuity|grat\b|balance|change|cash|credit|debit|visa|master|amex|discover|\bcard\b|amount|due|paid|tender|server|table|guests?|\border\b|receipt|thank|www|http|tel\b|phone|\bdate\b|\btime\b)/i;
+      const items = [];
+      text.split(/\n+/).forEach(raw => {
+        const line = raw.trim();
+        if (line.length < 3) return;
+        const matches = [...line.matchAll(/\$?\s*(\d{1,4}[.,]\d{2})\b/g)];
+        if (!matches.length) return;
+        const last = matches[matches.length - 1];
+        const price = parseFloat(last[1].replace(",", "."));
+        if (!price || price <= 0 || price > 2000) return;
+        let name = line.slice(0, last.index).replace(/\$/g, "").trim();
+        name = name.replace(/^\d+\s*[xX@]?\s*/, "").replace(/[.\-_*•]+$/, "").trim();
+        if (name.length < 2 || skip.test(name)) return;
+        items.push({ name, price });
+      });
+      return items;
+    }
+
+    // OCR the photo entirely in the browser (no upload, no keys)
+    async function runOCR(file) {
+      const status = $("ocrStatus");
+      status.classList.remove("hidden", "done");
+      if (typeof Tesseract === "undefined") { status.textContent = "Type the items in below."; return; }
+      status.textContent = "📖 Reading the receipt… 0% (first scan loads the reader, ~10–20s)";
+      try {
+        const { data } = await Tesseract.recognize(file, "eng", {
+          logger: m => {
+            if (m.status === "recognizing text")
+              status.textContent = "📖 Reading the receipt… " + Math.round(m.progress * 100) + "%";
+          }
+        });
+        const items = parseReceipt(data.text || "");
+        if (items.length) {
+          setItems(items);
+          status.classList.add("done");
+          status.textContent = "✓ Found " + items.length + " item" + (items.length > 1 ? "s" : "") +
+            " — double-check the names & prices below, then create the bill.";
+        } else {
+          status.textContent = "Couldn't read items clearly — just type them in below.";
+        }
+      } catch (e) {
+        status.textContent = "Couldn't scan that photo — type the items in below.";
+      }
     }
     function wireCreateScreen() {
       if ($("itemRows").children.length === 0) { addItemRow(); addItemRow(); }
@@ -184,6 +244,7 @@
         let img = $("photoBox").querySelector("img");
         if (!img) { img = document.createElement("img"); $("photoBox").appendChild(img); }
         img.src = url;
+        runOCR(file);
       });
       $("createBtn").onclick = createBill;
     }
