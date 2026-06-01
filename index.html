@@ -85,6 +85,7 @@
           <span class="hint" id="photoHint">📷 Add a photo — we'll try to read the items for you</span>
         </label>
         <div class="ocr-status hidden" id="ocrStatus"></div>
+        <button type="button" class="btn secondary hidden" id="clearPhoto" style="margin-top:10px">Remove photo</button>
       </div>
       <div class="card">
         <h2>2. Add the items</h2>
@@ -273,7 +274,18 @@
         let img = $("photoBox").querySelector("img");
         if (!img) { img = document.createElement("img"); $("photoBox").appendChild(img); }
         img.src = url;
+        $("clearPhoto").classList.remove("hidden");
         runOCR(file);
+      });
+
+      $("clearPhoto").addEventListener("click", () => {
+        $("photoInput").value = "";                       // allow re-picking the same file
+        const img = $("photoBox").querySelector("img");
+        if (img) img.remove();
+        $("photoHint").style.display = "";
+        $("ocrStatus").textContent = "";
+        $("ocrStatus").classList.add("hidden");
+        $("clearPhoto").classList.add("hidden");
       });
       $("createBtn").onclick = createBill;
     }
