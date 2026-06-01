@@ -185,20 +185,41 @@
     // turn raw receipt text into {name, price} rows
     function parseReceipt(text) {
       const skip = /(sub-?total|total|tax|tip|gratuity|grat\b|balance|change|cash|credit|debit|visa|master|amex|discover|\bcard\b|amount|due|paid|tender|server|table|guests?|\border\b|receipt|thank|www|http|tel\b|phone|\bdate\b|\btime\b)/i;
+      const clean = (s) => s.replace(/\$/g, "").replace(/^[\s\d#xX*•.\-]+/, "").replace(/[\s.\-_*•]+$/, "").trim();
       const items = [];
-      text.split(/\n+/).forEach(raw => {
-        const line = raw.trim();
-        if (line.length < 3) return;
+      const lines = text.split(/\n+/).map(s => s.trim());
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.length < 2) continue;
+
+        // quantity line:  "Bowl  12 @ 9.10  109.20"  ->  12 × Bowl @ $9.10
+        const qm = line.match(/(\d{1,3})\s*@\s*\$?\s*(\d{1,4}[.,]\d{2})/);
+        if (qm) {
+          const qty = parseInt(qm[1], 10);
+          const unit = parseFloat(qm[2].replace(",", "."));
+          let name = clean(line.slice(0, qm.index));
+          if (name.length < 2) {                       // name is probably on the line above
+            const prev = clean((lines[i - 1] || "").replace(/\$?\s*\d{1,4}[.,]\d{2}/g, ""));
+            if (prev.length >= 2 && !skip.test(prev)) name = prev;
+          }
+          if (!name || name.length < 2) name = "Item";
+          if (qty > 0 && qty <= 40 && unit > 0 && !skip.test(name)) {
+            for (let k = 0; k < qty; k++) items.push({ name: name, price: unit });
+            continue;
+          }
+        }
+
+        // normal "Item .... price" line
         const matches = [...line.matchAll(/\$?\s*(\d{1,4}[.,]\d{2})\b/g)];
-        if (!matches.length) return;
+        if (!matches.length) continue;
         const last = matches[matches.length - 1];
         const price = parseFloat(last[1].replace(",", "."));
-        if (!price || price <= 0 || price > 2000) return;
-        let name = line.slice(0, last.index).replace(/\$/g, "").trim();
-        name = name.replace(/^\d+\s*[xX@]?\s*/, "").replace(/[.\-_*•]+$/, "").trim();
-        if (name.length < 2 || skip.test(name)) return;
+        if (!price || price <= 0 || price > 2000) continue;
+        const name = clean(line.slice(0, last.index));
+        if (name.length < 2 || skip.test(name)) continue;
         items.push({ name, price });
-      });
+      }
       return items;
     }
 
